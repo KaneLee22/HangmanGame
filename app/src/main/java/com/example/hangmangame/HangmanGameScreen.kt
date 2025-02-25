@@ -1,6 +1,7 @@
 package com.example.hangmangame
 
 import android.content.res.Configuration
+import android.widget.Toast
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -10,22 +11,28 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
 @Composable
 fun HangmanGameScreen() {
-    val words = listOf("Boston", "University", "Computer", "Science")
+
+    val words = listOf("BOSTON", "UNIVERSITY", "COMPUTER", "SCIENCE")
+
 
     var currentWord by rememberSaveable { mutableStateOf(words.random()) }
     var guessedLetters by rememberSaveable { mutableStateOf("") }
+    var disabledLetters by rememberSaveable { mutableStateOf("") }
     var remainingAttempts by rememberSaveable { mutableStateOf(6) }
     var hintUsageCount by rememberSaveable { mutableStateOf(0) }
     var isGameOver by rememberSaveable { mutableStateOf(false) }
     var didWin by rememberSaveable { mutableStateOf(false) }
 
+
     fun newGame() {
         currentWord = words.random()
         guessedLetters = ""
+        disabledLetters = ""
         remainingAttempts = 6
         hintUsageCount = 0
         isGameOver = false
@@ -33,7 +40,8 @@ fun HangmanGameScreen() {
     }
 
     fun guessLetter(letter: Char) {
-        if (letter in guessedLetters || isGameOver) return
+        if (isGameOver || letter in guessedLetters || letter in disabledLetters) return
+
         guessedLetters += letter
         if (letter !in currentWord) {
             remainingAttempts--
@@ -42,7 +50,6 @@ fun HangmanGameScreen() {
                 didWin = false
             }
         } else {
-            // 全部猜出则胜
             val allRevealed = currentWord.all { it in guessedLetters }
             if (allRevealed) {
                 isGameOver = true
@@ -51,25 +58,61 @@ fun HangmanGameScreen() {
         }
     }
 
+    val context = LocalContext.current
     fun useHint(): Boolean {
         if (isGameOver) return false
         if (hintUsageCount >= 3) return false
-        if (remainingAttempts <= 1) return false
+
+        if (remainingAttempts <= 1) {
+            Toast.makeText(context, "Hint not available", Toast.LENGTH_SHORT).show()
+            return false
+        }
 
         hintUsageCount++
-        if (hintUsageCount > 1) {
-            remainingAttempts--
-            if (remainingAttempts <= 0) {
-                isGameOver = true
-                didWin = false
-                return false
+        when (hintUsageCount) {
+            1 -> {
+                Toast.makeText(context, "First Hint: It's a secret!", Toast.LENGTH_SHORT).show()
+            }
+            2 -> {
+                    val wrongUnpicked = ('A'..'Z').filter {
+                    it !in currentWord && it !in guessedLetters && it !in disabledLetters
+                }
+                val halfCount = wrongUnpicked.size / 2
+                val toDisable = wrongUnpicked.shuffled().take(halfCount)
+                disabledLetters += toDisable.joinToString("")
+                remainingAttempts--
+                if (remainingAttempts <= 0) {
+                    isGameOver = true
+                    didWin = false
+                    return false
+                }
+            }
+            3 -> {
+                val vowels = listOf('A', 'E', 'I', 'O', 'U')
+                currentWord.forEach { c ->
+                    if (c in vowels && c !in guessedLetters) {
+                        guessedLetters += c
+                    }
+                }
+                disabledLetters += vowels.joinToString("")
+                remainingAttempts--
+                if (remainingAttempts <= 0) {
+                    isGameOver = true
+                    didWin = false
+                    return false
+                }
+                val allRevealed = currentWord.all { it in guessedLetters }
+                if (allRevealed) {
+                    isGameOver = true
+                    didWin = true
+                }
             }
         }
         return true
     }
 
-    val configuration = LocalConfiguration.current
-    val isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+    val orientation = LocalConfiguration.current.orientation
+    val isPortrait = (orientation == Configuration.ORIENTATION_PORTRAIT)
 
     if (isPortrait) {
         Column(
@@ -84,21 +127,14 @@ fun HangmanGameScreen() {
                 remainingAttempts = remainingAttempts,
                 isGameOver = isGameOver,
                 didWin = didWin,
-                onNewGame = { newGame() },
+                onNewGame = ::newGame,
                 modifier = Modifier.weight(1f)
-            )
-
-            HintPanel(
-                hintUsageCount = hintUsageCount,
-                onHintClicked = { useHint() },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp)
             )
 
             LettersPanel(
                 guessedLetters = guessedLetters,
-                onLetterClicked = { guessLetter(it) },
+                disabledLetters = disabledLetters,
+                onLetterClicked = ::guessLetter,
                 modifier = Modifier.weight(1f)
             )
         }
@@ -111,7 +147,8 @@ fun HangmanGameScreen() {
         ) {
             LettersPanel(
                 guessedLetters = guessedLetters,
-                onLetterClicked = { guessLetter(it) },
+                disabledLetters = disabledLetters,
+                onLetterClicked = ::guessLetter,
                 modifier = Modifier.weight(1f)
             )
 
@@ -127,7 +164,7 @@ fun HangmanGameScreen() {
                 remainingAttempts = remainingAttempts,
                 isGameOver = isGameOver,
                 didWin = didWin,
-                onNewGame = { newGame() },
+                onNewGame = ::newGame,
                 modifier = Modifier.weight(2f)
             )
         }
@@ -137,26 +174,25 @@ fun HangmanGameScreen() {
 @Composable
 fun LettersPanel(
     guessedLetters: String,
+    disabledLetters: String,
     onLetterClicked: (Char) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val allLetters = ('A'..'Z')
-
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text("Choose a Letter", style = MaterialTheme.typography.titleMedium)
-
-        val chunkedLetters = allLetters.chunked(7)
-        chunkedLetters.forEach { rowLetters ->
+        val chunked = allLetters.chunked(7)
+        chunked.forEach { rowLetters ->
             Row(
                 modifier = Modifier
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 rowLetters.forEach { letter ->
-                    val isDisabled = letter in guessedLetters
+                    val isDisabled = letter in guessedLetters || letter in disabledLetters
                     Button(
                         onClick = { onLetterClicked(letter) },
                         enabled = !isDisabled,
@@ -187,14 +223,14 @@ fun HintPanel(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("Hints", style = MaterialTheme.typography.titleMedium)
+        Text("Hint Panel", style = MaterialTheme.typography.titleMedium)
         Button(onClick = {
             val ok = onHintClicked()
         }) {
             when (hintUsageCount) {
-                0 -> Text("Show Hint")
-                1 -> Text("Disable Half Letters (Costs a turn)")
-                2 -> Text("Reveal Vowels (Costs a turn)")
+                0 -> Text("Show Hint (no cost)")
+                1 -> Text("Disable Half Wrong (cost 1 turn)")
+                2 -> Text("Reveal Vowels (cost 1 turn)")
                 else -> Text("No Hints Left")
             }
         }
@@ -222,7 +258,7 @@ fun HangmanMainPanel(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Remaining Attempts: $remainingAttempts")
+            Text(text = "Remaining Attempts: $remainingAttempts")
 
             val revealed = currentWord.map { c ->
                 if (c in guessedLetters) c else '_'
@@ -235,15 +271,18 @@ fun HangmanMainPanel(
             if (isGameOver) {
                 val resultText = if (didWin) "You Won!" else "You Lost!"
                 Text(
-                    resultText,
+                    text = resultText,
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.error
                 )
             }
 
-            Button(onClick = { onNewGame() }) {
+            Button(onClick = onNewGame) {
                 Text("New Game")
             }
         }
     }
 }
+
+
+
